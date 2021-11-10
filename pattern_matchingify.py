@@ -2,13 +2,22 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
-from typing import Callable, List, NamedTuple, Optional, ParamSpec, TypeVar
+from functools import lru_cache
+from typing import (
+    Any,
+    Callable,
+    List,
+    NamedTuple,
+    Optional,
+    ParamSpec,
+    TypeVar,
+)
 
 import refactor
 from refactor import ReplacementAction, Rule
 
+T = TypeVar("T")
 P = ParamSpec("P")
-R = TypeVar("R")
 
 
 def iter_ifs(node: ast.If) -> IfGroup:
@@ -26,6 +35,40 @@ def is_dotted_name(node: ast.expr) -> bool:
             return is_dotted_name(value)
         case _:
             return False
+
+
+@lru_cache
+def iter_defaults(source: str) -> Dict[str, Callable[[], Any]]:
+    # If you hated this code, show your support to:
+    # https://github.com/python/cpython/pull/21417
+    declarations = source[source.find("(") + 1 : source.rfind(")")]
+
+    result = {}
+    for declaration in declarations.split(", "):
+        decl_type, field = declaration.split()
+        if decl_type.endswith("*"):
+            result[field] = list
+    return result
+
+
+def ast_post_init(node: T, *args, **kwargs) -> None:
+    """
+    Even if you don't use some fields of an AST node, you
+    have to pass them since there are not any defaults (beside
+    the optional ones). This code simply hacks around it, and
+    automatically initializes empty list fields by looking at
+    the ASDL.
+    """
+    ast_init(node, *args, **kwargs)
+
+    asdl = type(node).__doc__
+    for field, factory in iter_defaults(asdl).items():
+        if not hasattr(node, field):
+            setattr(node, field, factory())
+
+
+ast_init = ast.AST.__init__
+ast.AST.__init__ = ast_post_init
 
 
 @dataclass
@@ -50,7 +93,7 @@ class PatternMatchingifier(Rule):
     MINIMUM_CASE_THRESHOLD = 2
 
     @classmethod
-    def register(cls, func: Callable[P, R]) -> Callable[P, R]:
+    def register(cls, func: Callable[P, T]) -> Callable[P, T]:
         cls.transformers.append(func)
         return func
 
@@ -88,9 +131,7 @@ def handle_single_isinstance(
         case ast.Call(
             ast.Name("isinstance"), args=[subject, type_name], keywords=[]
         ) if is_dotted_name(type_name):
-            pattern = ast.MatchClass(
-                type_name, patterns=[], kwd_attrs=[], kwd_patterns=[]
-            )
+            pattern = ast.MatchClass(type_name)
             return SubjectfulCase(
                 subject, ast.match_case(pattern, body=node.body)
             )
