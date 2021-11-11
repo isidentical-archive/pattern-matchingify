@@ -41,6 +41,42 @@ TRUE_POSITIVES = [
                 type_str = 'unknown'
         """,
     ),
+    (
+        "complex_isinstance_1",
+        """
+        if isinstance(a, B.X):
+           type_str = 'B'
+        elif isinstance(a, (C, D)):
+            type_str = 'C'
+        """,
+        """
+        match a:
+            case B.X():
+                type_str = 'B'
+            case C() | D():
+                type_str = 'C'
+        """,
+    ),
+    (
+        "complex_isinstance_2",
+        """
+        if isinstance(a, (C, D.E, D.E.F)):
+           type_str = 'B'
+        elif isinstance(a, G):
+            type_str = 'C'
+        elif isinstance(a, (G.F,)):
+            type_str = 'C'
+        """,
+        """
+        match a:
+            case C() | D.E() | D.E.F():
+                type_str = 'B'
+            case G():
+                type_str = 'C'
+            case G.F():
+                type_str = 'C'
+        """,
+    ),
 ]
 
 FALSE_NEGATIVES = [
@@ -61,15 +97,12 @@ FALSE_NEGATIVES = [
     )
 ]
 
+ALL_CASES = [*TRUE_POSITIVES, *FALSE_NEGATIVES]
+TEST_IDS, TESTS = zip(*[(test[0], test[1:]) for test in ALL_CASES])
 
-@pytest.mark.parametrize(
-    "key, source, expected",
-    [
-        *TRUE_POSITIVES,
-        *FALSE_NEGATIVES,
-    ],
-)
-def test_pattern_matchingify(key, source, expected):
+
+@pytest.mark.parametrize("source, expected", TESTS, ids=TEST_IDS)
+def test_pattern_matchingify(source, expected):
     source, expected = textwrap.dedent(source), textwrap.dedent(expected)
     refactored = pattern_matchingify.pattern_matchingify(source)
     assert refactored == expected

@@ -104,13 +104,12 @@ class PatternMatchingifier(Rule):
         subjects = []
         group = IfGroup.from_single(node)
 
-        statements = group.stmts.copy()
-        for transformer in self.transformers:
-            for statement in statements.copy():
+        for statement in group.stmts:
+            for transformer in self.transformers:
                 if case := transformer(self, statement):
                     cases.append(case.stmt)
                     subjects.append(case.subject)
-                    statements.remove(statement)
+                    break
 
         assert len(set(ast.dump(subject) for subject in subjects)) == 1
         assert len(cases) >= self.MINIMUM_CASE_THRESHOLD
@@ -132,6 +131,24 @@ def handle_single_isinstance(
             ast.Name("isinstance"), args=[subject, type_name], keywords=[]
         ) if is_dotted_name(type_name):
             pattern = ast.MatchClass(type_name)
+            return SubjectfulCase(
+                subject, ast.match_case(pattern, body=node.body)
+            )
+
+
+@PatternMatchingifier.register
+def handle_complex_isinstance(
+    manager: PatternMatchingifier, node: ast.If
+) -> Optional[SubjectfulCase]:
+    match node.test:
+        case ast.Call(
+            ast.Name("isinstance"),
+            args=[subject, ast.Tuple(type_names)],
+            keywords=[],
+        ) if all(map(is_dotted_name, type_names)):
+            pattern = ast.MatchOr(
+                [ast.MatchClass(type_name) for type_name in type_names]
+            )
             return SubjectfulCase(
                 subject, ast.match_case(pattern, body=node.body)
             )
