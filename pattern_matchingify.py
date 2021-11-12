@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import ast
+import functools
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import (
     Any,
     Callable,
@@ -37,7 +37,7 @@ def is_dotted_name(node: ast.expr) -> bool:
             return False
 
 
-@lru_cache
+@functools.lru_cache
 def iter_defaults(source: str) -> Dict[str, Callable[[], Any]]:
     # If you hated this code, show your support to:
     # https://github.com/python/cpython/pull/21417
@@ -88,14 +88,26 @@ class SubjectfulCase(NamedTuple):
 
 
 class PatternMatchingifier(Rule):
-    transformers = []
+    """
+    Convert if/else statements to match/case
+    if it is applicable.
+    """
 
     MINIMUM_CASE_THRESHOLD = 2
 
+    transformers = []
+
     @classmethod
     def register(cls, func: Callable[P, T]) -> Callable[P, T]:
-        cls.transformers.append(func)
-        return func
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except AssertionError:
+                return None
+
+        cls.transformers.append(wrapper)
+        return wrapper
 
     def match(self, node: ast.AST) -> Optional[Action]:
         assert isinstance(node, ast.If)
@@ -126,32 +138,38 @@ class PatternMatchingifier(Rule):
 def handle_single_isinstance(
     manager: PatternMatchingifier, node: ast.If
 ) -> Optional[SubjectfulCase]:
-    match node.test:
-        case ast.Call(
-            ast.Name("isinstance"), args=[subject, type_name], keywords=[]
-        ) if is_dotted_name(type_name):
-            pattern = ast.MatchClass(type_name)
-            return SubjectfulCase(
-                subject, ast.match_case(pattern, body=node.body)
-            )
+    assert isinstance(test := node.test, ast.Call)
+    assert isinstance(test.func, ast.Name)
+    assert test.func.id == "isinstance"
+    assert len(test.args) == 2
+    assert len(test.keywords) == 0
+
+    subject, type_name = test.args
+    assert is_dotted_name(type_name)
+
+    pattern = ast.MatchClass(type_name)
+    return SubjectfulCase(subject, ast.match_case(pattern, body=node.body))
 
 
 @PatternMatchingifier.register
 def handle_complex_isinstance(
     manager: PatternMatchingifier, node: ast.If
 ) -> Optional[SubjectfulCase]:
-    match node.test:
-        case ast.Call(
-            ast.Name("isinstance"),
-            args=[subject, ast.Tuple(type_names)],
-            keywords=[],
-        ) if all(map(is_dotted_name, type_names)):
-            pattern = ast.MatchOr(
-                [ast.MatchClass(type_name) for type_name in type_names]
-            )
-            return SubjectfulCase(
-                subject, ast.match_case(pattern, body=node.body)
-            )
+    test = node.test
+    assert isinstance(test := node.test, ast.Call)
+    assert isinstance(test.func, ast.Name)
+    assert test.func.id == "isinstance"
+    assert len(test.args) == 2
+    assert len(test.keywords) == 0
+
+    subject, type_names_tuple = test.args
+    assert isinstance(type_names_tuple, ast.Tuple)
+    assert all(map(is_dotted_name, type_names := type_names_tuple.elts))
+
+    pattern = ast.MatchOr(
+        [ast.MatchClass(type_name) for type_name in type_names]
+    )
+    return SubjectfulCase(subject, ast.match_case(pattern, body=node.body))
 
 
 def pattern_matchingify(source: str) -> str:
