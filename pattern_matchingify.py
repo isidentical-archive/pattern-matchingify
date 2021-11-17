@@ -135,40 +135,36 @@ class PatternMatchingifier(Rule):
 
 
 @PatternMatchingifier.register
-def handle_single_isinstance(
+def handle_isinstance(
     manager: PatternMatchingifier, node: ast.If
 ) -> Optional[SubjectfulCase]:
+    """
+    Convert a simple isinstance() call to a catch case.
+
+    Rules:
+        - isinstance(X, Y) => case Y(): <subject: X>
+        - isinstance(X, Y.Z) => case Y.Z(): <subject: X>
+        - isinstance(X, (Q, T)) => case Q() | T(): <subject: X>
+    """
+
     assert isinstance(test := node.test, ast.Call)
     assert isinstance(test.func, ast.Name)
     assert test.func.id == "isinstance"
     assert len(test.args) == 2
     assert len(test.keywords) == 0
 
-    subject, type_name = test.args
-    assert is_dotted_name(type_name)
+    subject, maybe_type = test.args
+    if is_dotted_name(maybe_type):
+        pattern = ast.MatchClass(maybe_type)
+    elif isinstance(maybe_type, ast.Tuple):
+        assert len(maybe_type.elts) >= 1
+        assert all(map(is_dotted_name, type_names := maybe_type.elts))
+        pattern = ast.MatchOr(
+            [ast.MatchClass(type_name) for type_name in type_names]
+        )
+    else:
+        return None
 
-    pattern = ast.MatchClass(type_name)
-    return SubjectfulCase(subject, ast.match_case(pattern, body=node.body))
-
-
-@PatternMatchingifier.register
-def handle_complex_isinstance(
-    manager: PatternMatchingifier, node: ast.If
-) -> Optional[SubjectfulCase]:
-    test = node.test
-    assert isinstance(test := node.test, ast.Call)
-    assert isinstance(test.func, ast.Name)
-    assert test.func.id == "isinstance"
-    assert len(test.args) == 2
-    assert len(test.keywords) == 0
-
-    subject, type_names_tuple = test.args
-    assert isinstance(type_names_tuple, ast.Tuple)
-    assert all(map(is_dotted_name, type_names := type_names_tuple.elts))
-
-    pattern = ast.MatchOr(
-        [ast.MatchClass(type_name) for type_name in type_names]
-    )
     return SubjectfulCase(subject, ast.match_case(pattern, body=node.body))
 
 
