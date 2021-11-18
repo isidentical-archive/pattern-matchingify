@@ -77,6 +77,37 @@ TRUE_POSITIVES = [
                 type_str = 'C'
         """,
     ),
+    (
+        "attribute_chained_isinstance_1",
+        """
+        if (
+            isinstance(a, B)
+            and a.attr_1 == 1
+            and a.attr_2 == 3
+        ):
+            print(a.attr_3)
+        elif (
+            isinstance(a, C)
+            and a.bla_bla == 'xyz'
+        ):
+            print(a.bla_bla)
+        elif isinstance(a, Q):
+            print('Q')
+        else:
+            pass
+        """,
+        """
+        match a:
+            case B(attr_1=1, attr_2=3):
+                print(a.attr_3)
+            case C(bla_bla='xyz'):
+                print(a.bla_bla)
+            case Q():
+                print('Q')
+            case _:
+                pass
+        """,
+    ),
 ]
 
 FALSE_NEGATIVES = [
