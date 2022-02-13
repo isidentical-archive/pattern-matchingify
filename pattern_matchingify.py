@@ -50,8 +50,6 @@ def is_dotted_name(node: ast.expr) -> bool:
 
 @functools.lru_cache
 def iter_defaults(source: str) -> Dict[str, Callable[[], Any]]:
-    # If you hated this code, show your support to:
-    # https://github.com/python/cpython/pull/21417
     declarations = source[source.find("(") + 1 : source.rfind(")")]
 
     result = {}
@@ -63,13 +61,6 @@ def iter_defaults(source: str) -> Dict[str, Callable[[], Any]]:
 
 
 def ast_post_init(node: T, *args, **kwargs) -> None:
-    """
-    Even if you don't use some fields of an AST node, you
-    have to pass them since there are not any defaults (beside
-    the optional ones). This code simply hacks around it, and
-    automatically initializes empty list fields by looking at
-    the ASDL.
-    """
     ast_init(node, *args, **kwargs)
 
     asdl = type(node).__doc__
